@@ -1,5 +1,6 @@
 import bpy
-from mathutils import Vector
+from mathutils import Vector, Matrix, Euler, Quaternion
+from math import radians
 
 bl_info = {
     "name": "Recursive Apply Transform",
@@ -26,37 +27,35 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
     @staticmethod
     def div(a, b):
         return Vector((a.x / b.x, a.y / b.y, a.z / b.z))
-    
+
+
     def __init__(self):
         self.meshes = []
         
-    def first_transform(self, obj, target_scale):
-        resize = self.div(target_scale, obj.scale)
-        resize_inverse = self.div(Vector((1, 1, 1)), resize)
-        obj.scale = self.mul(obj.scale, resize)
+    def first_transform(self, obj, affine):
+        obj.matrix_local = obj.matrix_local @ affine
 
-        if obj.type == "MESH" and not obj.data in self.meshes:
+        if obj.type == "MESH":
+            print("poe")
             self.meshes.append(obj.data)
             for v in obj.data.vertices:
-                v.co = self.mul(v.co, resize_inverse)
+                v.co = (affine.inverted() @ v.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             for b in obj.data.bones:
-                b.head = self.mul(b.head, resize_inverse)
-                b.tail = self.mul(b.tail, resize_inverse)
+                b.head = (affine @ b.head.to_4d()).to_3d()
+                b.tail = (affine @ b.tail.to_4d()).to_3d()
 
         for child in obj.children:
-            self.recursive_transform(child, resize_inverse)
+            self.recursive_transform(child, affine)
 
-    def recursive_transform(self, obj, resize_inverse):
-        obj.location = self.mul(obj.location, resize_inverse)
+    def recursive_transform(self, obj, affine):
+        obj.location = (affine @ obj.location.to_4d()).to_3d()
 
         if obj.type == "MESH" and not obj.data in self.meshes:
             self.meshes.append(obj.data)
-            for mesh in self.meshes:
-                print(mesh)
             for v in obj.data.vertices:
-                v.co = self.mul(v.co, resize_inverse)
+                v.co = (affine @ v.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             bpy.context.view_layer.objects.active = obj
@@ -64,25 +63,36 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
             bones = []
             for b in obj.data.edit_bones:
                 bones.append((
-                    self.mul(b.head, resize_inverse),
-                    self.mul(b.tail, resize_inverse)
+                    (affine @ b.head.to_4d()).to_3d(),
+                    (affine @ b.tail.to_4d()).to_3d()
                 ))
             for i in range(len(obj.data.edit_bones)):
                 obj.data.edit_bones[i].head, obj.data.edit_bones[i].tail = bones[i]
             bpy.ops.object.mode_set(mode="OBJECT")
 
         for child in obj.children:
-            self.recursive_transform(child, resize_inverse)
+            self.recursive_transform(child, affine)
+    
 
     def execute(self, context):
+        t = context.scene.halby_recursive_apply_transform
+        o = context.active_object
 
-        target_scale = Vector((
-            context.scene.halby_recursive_apply_transform.transform_x_scale,
-            context.scene.halby_recursive_apply_transform.transform_y_scale,
-            context.scene.halby_recursive_apply_transform.transform_z_scale
+        # Object Affine
+        object_affine = o.matrix_local
+
+        # Target Affine
+        loc = Matrix.Translation((t.transform_x_location, t.transform_y_location, t.transform_z_location))
+        rot = Euler((t.transform_x_rotation, t.transform_y_rotation, t.transform_z_rotation)).to_matrix().to_4x4()
+        sca = Matrix((
+            [t.transform_x_scale, 0, 0, 0],
+            [0, t.transform_y_scale, 0, 0],
+            [0, 0, t.transform_z_scale, 0],
+            [0, 0, 0, 1]
         ))
+        target_affine = rot
 
-        self.first_transform(context.active_object, target_scale)
+        self.first_transform(context.active_object, object_affine.inverted() @ target_affine)
 
         return {'FINISHED'}
 
@@ -110,7 +120,26 @@ class HALBY_PT_RecursiveApplyTransformUI(bpy.types.Panel):
         scn = context.scene.halby_recursive_apply_transform
         layout = self.layout
 
+        layout.label(text="Location")
+        
+        col = layout.column(align=True)
+        col.prop(scn, "transform_x_location")  
+        col.prop(scn, "transform_y_location")  
+        col.prop(scn, "transform_z_location")
+        
+        layout.separator()
+
+        layout.label(text="Rotation")
+        
+        col = layout.column(align=True)
+        col.prop(scn, "transform_x_rotation")  
+        col.prop(scn, "transform_y_rotation")  
+        col.prop(scn, "transform_z_rotation")
+        
+        layout.separator()
+
         layout.label(text="Scale")
+
         col = layout.column(align=True)
         col.prop(scn, "transform_x_scale")  
         col.prop(scn, "transform_y_scale")  
@@ -122,6 +151,12 @@ class HALBY_PT_RecursiveApplyTransformUI(bpy.types.Panel):
 
 
 class HALBY_PG_RecursiveApplyTransformProps(bpy.types.PropertyGroup):
+    transform_x_location: bpy.props.FloatProperty(name="X", unit="LENGTH")
+    transform_y_location: bpy.props.FloatProperty(name="Y", unit="LENGTH")
+    transform_z_location: bpy.props.FloatProperty(name="Z", unit="LENGTH")
+    transform_x_rotation: bpy.props.FloatProperty(name="X", unit="ROTATION")
+    transform_y_rotation: bpy.props.FloatProperty(name="Y", unit="ROTATION")
+    transform_z_rotation: bpy.props.FloatProperty(name="Z", unit="ROTATION")
     transform_x_scale: bpy.props.FloatProperty(name="X", default=1.0, min=0.0001)
     transform_y_scale: bpy.props.FloatProperty(name="Y", default=1.0, min=0.0001)
     transform_z_scale: bpy.props.FloatProperty(name="Z", default=1.0, min=0.0001)
