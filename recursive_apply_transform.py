@@ -40,6 +40,11 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
             self.meshes.append(obj.data)
             for v in obj.data.vertices:
                 v.co = (affine_inverse @ v.co.to_4d()).to_3d()
+            if obj.data.shape_keys != None:
+                for kb in obj.data.shape_keys.key_blocks:
+                    if kb.name != "Basis":
+                        for idx, dat in enumerate(kb.data):
+                            dat.co = (affine_inverse @ dat.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             for b in obj.data.bones:
@@ -52,12 +57,17 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
     def recursive_transform(self, obj, affine):
         obj.location = (affine.inverted() @ obj.location.to_4d()).to_3d()
 
-        rs_inverse = affine.to_3x3().to_4x4().inverted()
+        rs_inverse = affine.inverted().to_3x3().to_4x4()
 
         if obj.type == "MESH" and not obj.data in self.meshes:
             self.meshes.append(obj.data)
             for v in obj.data.vertices:
                 v.co = (rs_inverse @ v.co.to_4d()).to_3d()
+            if obj.data.shape_keys != None:
+                for kb in obj.data.shape_keys.key_blocks:
+                    if kb.name != "Basis":
+                        for idx, dat in enumerate(kb.data):
+                            dat.co = (affine_inverse @ dat.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             bpy.context.view_layer.objects.active = obj
