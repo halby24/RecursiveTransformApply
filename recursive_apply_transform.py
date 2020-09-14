@@ -34,28 +34,30 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
         
     def first_transform(self, obj, affine):
         obj.matrix_local = obj.matrix_local @ affine
+        affine_inverse = affine.inverted()
 
         if obj.type == "MESH":
-            print("poe")
             self.meshes.append(obj.data)
             for v in obj.data.vertices:
-                v.co = (affine.inverted() @ v.co.to_4d()).to_3d()
+                v.co = (affine_inverse @ v.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             for b in obj.data.bones:
-                b.head = (affine @ b.head.to_4d()).to_3d()
-                b.tail = (affine @ b.tail.to_4d()).to_3d()
+                b.head = (affine_inverse @ b.head.to_4d()).to_3d()
+                b.tail = (affine_inverse @ b.tail.to_4d()).to_3d()
 
         for child in obj.children:
             self.recursive_transform(child, affine)
 
     def recursive_transform(self, obj, affine):
-        obj.location = (affine @ obj.location.to_4d()).to_3d()
+        obj.location = (affine.inverted() @ obj.location.to_4d()).to_3d()
+
+        rs_inverse = affine.to_3x3().to_4x4().inverted()
 
         if obj.type == "MESH" and not obj.data in self.meshes:
             self.meshes.append(obj.data)
             for v in obj.data.vertices:
-                v.co = (affine @ v.co.to_4d()).to_3d()
+                v.co = (rs_inverse @ v.co.to_4d()).to_3d()
 
         elif obj.type == "ARMATURE":
             bpy.context.view_layer.objects.active = obj
@@ -63,8 +65,8 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
             bones = []
             for b in obj.data.edit_bones:
                 bones.append((
-                    (affine @ b.head.to_4d()).to_3d(),
-                    (affine @ b.tail.to_4d()).to_3d()
+                    (rs_inverse @ b.head.to_4d()).to_3d(),
+                    (rs_inverse @ b.tail.to_4d()).to_3d()
                 ))
             for i in range(len(obj.data.edit_bones)):
                 obj.data.edit_bones[i].head, obj.data.edit_bones[i].tail = bones[i]
@@ -90,7 +92,7 @@ class HALBY_OT_RecursiveApplyTransformButton(bpy.types.Operator):
             [0, 0, t.transform_z_scale, 0],
             [0, 0, 0, 1]
         ))
-        target_affine = rot
+        target_affine = loc @ rot @ sca
 
         self.first_transform(context.active_object, object_affine.inverted() @ target_affine)
 
